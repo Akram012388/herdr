@@ -2208,12 +2208,7 @@ fn events_subscribe_streams_output_and_agent_status_events() {
         .as_str()
         .unwrap()
         .to_string();
-
-    let panes = send_request(
-        &socket_path,
-        r#"{"id":"req_21","method":"pane.list","params":{}}"#,
-    );
-    let pane_id = panes["result"]["panes"][0]["pane_id"]
+    let pane_id = created["result"]["root_pane"]["pane_id"]
         .as_str()
         .unwrap()
         .to_string();
