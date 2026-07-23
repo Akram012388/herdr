@@ -132,6 +132,7 @@ fn channel_set(args: &[String]) -> std::io::Result<i32> {
 
     if let Some(reason) = channel_set_rejection(
         channel,
+        crate::update::downstream_channel_rejection_for_current_build(),
         crate::update::preview_channel_rejection_for_current_install(),
     ) {
         eprintln!("{reason}.");
@@ -204,8 +205,13 @@ fn parse_channel_set_arg(args: &[String]) -> Option<&str> {
 
 fn channel_set_rejection(
     channel: &str,
+    downstream_rejection: Option<&'static str>,
     install_rejection: Option<&'static str>,
 ) -> Option<&'static str> {
+    if downstream_rejection.is_some() {
+        return downstream_rejection;
+    }
+
     if cfg!(windows) && channel == "stable" {
         return Some(
             "stable channel is not available on Windows yet; Windows builds are preview-only",
@@ -979,11 +985,11 @@ mod tests {
     #[test]
     fn channel_set_rejects_package_managed_preview_before_config_write() {
         assert_eq!(
-            super::channel_set_rejection("preview", Some("no preview")),
+            super::channel_set_rejection("preview", None, Some("no preview")),
             Some("no preview")
         );
         assert_eq!(
-            super::channel_set_rejection("stable", Some("no preview")),
+            super::channel_set_rejection("stable", None, Some("no preview")),
             if cfg!(windows) {
                 Some(
                     "stable channel is not available on Windows yet; Windows builds are preview-only",
@@ -992,13 +998,29 @@ mod tests {
                 None
             }
         );
-        assert_eq!(super::channel_set_rejection("preview", None), None);
+        assert_eq!(super::channel_set_rejection("preview", None, None), None);
+    }
+
+    #[test]
+    fn channel_set_rejects_downstream_builds_before_config_write() {
+        assert_eq!(
+            super::channel_set_rejection("stable", Some("downstream updates are disabled"), None),
+            Some("downstream updates are disabled")
+        );
+        assert_eq!(
+            super::channel_set_rejection(
+                "preview",
+                Some("downstream updates are disabled"),
+                Some("no preview")
+            ),
+            Some("downstream updates are disabled")
+        );
     }
 
     #[test]
     fn channel_set_rejects_stable_only_on_windows() {
         assert_eq!(
-            super::channel_set_rejection("stable", None),
+            super::channel_set_rejection("stable", None, None),
             if cfg!(windows) {
                 Some(
                     "stable channel is not available on Windows yet; Windows builds are preview-only",

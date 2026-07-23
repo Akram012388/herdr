@@ -1942,8 +1942,29 @@ fn homebrew_cellar_keg_root(path: &Path) -> Option<PathBuf> {
 // Public API
 // ---------------------------------------------------------------------------
 
+const AKRAM_UPDATE_DISABLED_MESSAGE: &str =
+    "self-update is disabled for the Akram downstream build; update it from the Akram012388/herdr fork checkout";
+const AKRAM_CHANNEL_DISABLED_MESSAGE: &str =
+    "official update channels are disabled for the Akram downstream build; update it from the Akram012388/herdr fork checkout";
+
+fn downstream_update_rejection(build_channel: &str) -> Option<&'static str> {
+    (build_channel == "akram").then_some(AKRAM_UPDATE_DISABLED_MESSAGE)
+}
+
+pub(crate) fn downstream_channel_rejection_for_current_build() -> Option<&'static str> {
+    downstream_channel_rejection(crate::build_info::channel())
+}
+
+fn downstream_channel_rejection(build_channel: &str) -> Option<&'static str> {
+    (build_channel == "akram").then_some(AKRAM_CHANNEL_DISABLED_MESSAGE)
+}
+
 /// Manual self-update command (`herdr update`).
 pub fn self_update(options: SelfUpdateOptions) -> Result<Version, String> {
+    if let Some(message) = downstream_update_rejection(crate::build_info::channel()) {
+        return Err(message.into());
+    }
+
     let channel = UpdateChannel::configured();
     #[cfg(windows)]
     if channel == UpdateChannel::Stable {
@@ -2098,6 +2119,14 @@ pub fn auto_update(events: tokio::sync::mpsc::Sender<crate::events::AppEvent>) {
                 install_command: update_install_command().to_string(),
             });
         }
+        return;
+    }
+
+    if let Some(message) = downstream_update_rejection(crate::build_info::channel()) {
+        tracing::info!(
+            message,
+            "official update checks disabled for downstream build"
+        );
         return;
     }
 
@@ -2342,6 +2371,22 @@ mod tests {
                 patch: 3
             })
         );
+    }
+
+    #[test]
+    fn akram_downstream_build_rejects_official_self_updates() {
+        assert_eq!(
+            downstream_update_rejection("akram"),
+            Some(AKRAM_UPDATE_DISABLED_MESSAGE)
+        );
+        assert_eq!(
+            downstream_channel_rejection("akram"),
+            Some(AKRAM_CHANNEL_DISABLED_MESSAGE)
+        );
+        assert_eq!(downstream_update_rejection("stable"), None);
+        assert_eq!(downstream_update_rejection("preview"), None);
+        assert_eq!(downstream_channel_rejection("stable"), None);
+        assert_eq!(downstream_channel_rejection("preview"), None);
     }
 
     #[test]

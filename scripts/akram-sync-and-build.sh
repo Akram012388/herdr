@@ -20,9 +20,28 @@ if ! git remote get-url upstream >/dev/null 2>&1; then
   exit 1
 fi
 
+backup_ref="refs/akram-backups/pre-sync-$(date -u +%Y%m%dT%H%M%SZ)"
+git update-ref "$backup_ref" HEAD
+rebase_started=false
+abort_failed_rebase() {
+  if [[ "$rebase_started" == "true" ]] &&
+    [[ -d "$repo_root/.git/rebase-merge" || -d "$repo_root/.git/rebase-apply" ]]; then
+    printf 'Aborting failed rebase; source backup remains at %s\n' "$backup_ref" >&2
+    git rebase --abort
+  fi
+}
+trap abort_failed_rebase ERR
+
 zig="${ZIG:-/opt/homebrew/opt/zig@0.15/bin/zig}"
 if [[ ! -x "$zig" ]]; then
   printf 'error: patched Zig 0.15 executable not found at %s\n' "$zig" >&2
+  exit 1
+fi
+
+build_channel="${HERDR_BUILD_CHANNEL:-akram}"
+build_id="${HERDR_BUILD_ID:-1}"
+if [[ "$build_channel" != "akram" || -z "$build_id" || "$build_id" == *[!A-Za-z0-9-]* ]]; then
+  printf 'error: downstream identity must use HERDR_BUILD_CHANNEL=akram and a non-empty HERDR_BUILD_ID\n' >&2
   exit 1
 fi
 
@@ -30,7 +49,9 @@ printf 'Fetching official Herdr upstream...\n'
 git fetch upstream --prune --tags
 
 printf 'Rebasing the Akram patch stack onto upstream/master...\n'
+rebase_started=true
 git rebase upstream/master
+rebase_started=false
 
 printf 'Validating the rebased integration branch...\n'
 cargo fmt --check
@@ -38,8 +59,23 @@ ZIG="$zig" cargo clippy --all-targets --locked -- -D warnings
 # Serialize the complete suite: some configuration tests mutate process-wide environment state.
 # Keep integration tests included so a broken upstream sync never produces an approved build.
 ZIG="$zig" cargo test --locked -- --test-threads=1
-ZIG="$zig" cargo build --release --locked
+HERDR_BUILD_CHANNEL="$build_channel" HERDR_BUILD_ID="$build_id" \
+  ZIG="$zig" cargo build --release --locked
+
+base_version="$(cargo metadata --no-deps --format-version 1 | python3 -c '
+import json, sys
+packages = json.load(sys.stdin)["packages"]
+print(next(package["version"] for package in packages if package["name"] == "herdr"))
+')"
+expected_version="herdr ${base_version}-${build_channel}.${build_id}"
+actual_version="$("$repo_root/target/release/herdr" --version)"
+if [[ "$actual_version" != "$expected_version" ]]; then
+  printf 'error: expected release identity %s, got %s\n' "$expected_version" "$actual_version" >&2
+  exit 1
+fi
 
 printf '\nValidated binary:\n  %s/target/release/herdr\n' "$repo_root"
+printf '  %s\n' "$actual_version"
 shasum -a 256 "$repo_root/target/release/herdr"
+printf 'Source backup:\n  %s\n' "$backup_ref"
 printf '\nReview the rebase, then publish it with:\n  git push --force-with-lease origin akram\n'
