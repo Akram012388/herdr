@@ -24,6 +24,8 @@ pub(crate) use manifest::load_plugin_manifest;
 #[cfg(test)]
 use runtime::{read_capped_plugin_output, MAX_PLUGIN_COMMANDS_IN_FLIGHT};
 
+pub(crate) const PLUGIN_PANE_THEME_ENV_VAR: &str = "HERDR_PLUGIN_PANE_THEME_JSON";
+
 impl App {
     fn replace_installed_plugins(&mut self, entries: Vec<InstalledPluginInfo>) {
         let entries =
@@ -1492,7 +1494,7 @@ platforms = ["linux", "macos"]
 [[panes]]
 id = "board"
 title = "Plugin Board"
-command = ["sh", "-c", "printf '%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n' \"$PWD\" \"$HERDR_PLUGIN_ID\" \"$HERDR_PLUGIN_ENTRYPOINT_ID\" \"$HERDR_WORKSPACE_ID\" \"$HERDR_PANE_ID\" \"$HERDR_BIN_PATH\" \"$HERDR_PLUGIN_CONTEXT_JSON\" \"${{HERDR_CELL_WIDTH_PX-unset}}\" \"${{HERDR_CELL_HEIGHT_PX-unset}}\" > {}"]
+command = ["sh", "-c", "printf '%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n' \"$PWD\" \"$HERDR_PLUGIN_ID\" \"$HERDR_PLUGIN_ENTRYPOINT_ID\" \"$HERDR_WORKSPACE_ID\" \"$HERDR_PANE_ID\" \"$HERDR_BIN_PATH\" \"$HERDR_PLUGIN_CONTEXT_JSON\" \"$HERDR_PLUGIN_PANE_THEME_JSON\" \"${{HERDR_CELL_WIDTH_PX-unset}}\" \"${{HERDR_CELL_HEIGHT_PX-unset}}\" > {}"]
 "#,
                 capture.display()
             ),
@@ -1520,6 +1522,10 @@ command = ["sh", "-c", "printf '%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n' \"$PWD\" \
                     ),
                     (
                         "HERDR_PLUGIN_CONTEXT_JSON".to_string(),
+                        "{\"spoofed\":true}".to_string(),
+                    ),
+                    (
+                        "HERDR_PLUGIN_PANE_THEME_JSON".to_string(),
                         "{\"spoofed\":true}".to_string(),
                     ),
                     (
@@ -1566,6 +1572,12 @@ command = ["sh", "-c", "printf '%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n' \"$PWD\" \
             context.focused_pane_id.as_deref(),
             Some(target_public_pane_id.as_str())
         );
+        let theme: serde_json::Value =
+            serde_json::from_str(lines.next().expect("pane theme json")).unwrap();
+        assert_eq!(theme["schema_version"], 1);
+        assert_eq!(theme["name"], app.state.theme_name);
+        assert_eq!(theme["palette"].as_object().unwrap().len(), 16);
+        assert_ne!(theme, serde_json::json!({"spoofed": true}));
         assert_eq!(lines.next(), Some("unset"));
         assert_eq!(lines.next(), Some("unset"));
 
@@ -2263,6 +2275,9 @@ command = ["sh", "-c", "printf %s ${{HERDR_PANE_ID-unset}} > '{}'; sleep 1"]
     #[cfg(unix)]
     #[test]
     fn manifest_action_invoke_runs_command_and_captures_log() {
+        let _guard = crate::config::test_config_env_lock().lock().unwrap();
+        let previous_theme = std::env::var_os(PLUGIN_PANE_THEME_ENV_VAR);
+        std::env::set_var(PLUGIN_PANE_THEME_ENV_VAR, "ambient-spoof");
         let mut app = test_app();
         let root = unique_temp_path("plugin-action-runner");
         write_manifest_content(
@@ -2277,7 +2292,7 @@ platforms = ["linux", "macos"]
 [[actions]]
 id = "run"
 title = "Run"
-command = ["sh", "-c", "printf '%s' \"$HERDR_PLUGIN_ACTION_ID\""]
+command = ["sh", "-c", "printf '%s\n%s' \"$HERDR_PLUGIN_ACTION_ID\" \"${HERDR_PLUGIN_PANE_THEME_JSON-unset}\""]
 "#,
         );
         link_manifest(&mut app, &root);
@@ -2321,10 +2336,14 @@ command = ["sh", "-c", "printf '%s' \"$HERDR_PLUGIN_ACTION_ID\""]
             .find(|entry| entry.log_id == log.log_id)
             .expect("log should exist");
         assert_eq!(finished.status, PluginCommandStatus::Succeeded);
-        assert_eq!(finished.stdout.as_deref(), Some("run"));
+        assert_eq!(finished.stdout.as_deref(), Some("run\nunset"));
         assert_eq!(finished.exit_code, Some(0));
 
         let _ = std::fs::remove_dir_all(root);
+        match previous_theme {
+            Some(previous) => std::env::set_var(PLUGIN_PANE_THEME_ENV_VAR, previous),
+            None => std::env::remove_var(PLUGIN_PANE_THEME_ENV_VAR),
+        }
     }
 
     #[cfg(unix)]
@@ -2441,6 +2460,9 @@ command = ["sh", "-c", "printf '%s\n%s\n%s' \"$HERDR_PLUGIN_ROOT\" \"$HERDR_PLUG
     #[cfg(unix)]
     #[test]
     fn startup_hooks_run_once_with_plugin_environment() {
+        let _guard = crate::config::test_config_env_lock().lock().unwrap();
+        let previous_theme = std::env::var_os(PLUGIN_PANE_THEME_ENV_VAR);
+        std::env::set_var(PLUGIN_PANE_THEME_ENV_VAR, "ambient-spoof");
         let mut app = test_app();
         let root = unique_temp_path("plugin-startup-hook");
         let capture = root.join("startup.txt");
@@ -2455,7 +2477,7 @@ min_herdr_version = "0.6.10"
 platforms = ["linux", "macos"]
 
 [[startup]]
-command = ["sh", "-c", "printf '%s:%s' \"$HERDR_PLUGIN_ID\" \"$HERDR_PLUGIN_EVENT\" > {}"]
+command = ["sh", "-c", "printf '%s:%s:%s' \"$HERDR_PLUGIN_ID\" \"$HERDR_PLUGIN_EVENT\" \"${{HERDR_PLUGIN_PANE_THEME_JSON-unset}}\" > {}"]
 "#,
                 capture.display()
             ),
@@ -2468,16 +2490,23 @@ command = ["sh", "-c", "printf '%s:%s' \"$HERDR_PLUGIN_ID\" \"$HERDR_PLUGIN_EVEN
             read_capture_when_ready(&capture, || {
                 app.drain_all_internal_events();
             }),
-            "example.startup:startup"
+            "example.startup:startup:unset"
         );
         let plugin = app.state.installed_plugins.get("example.startup").unwrap();
         assert_eq!(plugin.startup.len(), 1);
         let _ = std::fs::remove_dir_all(root);
+        match previous_theme {
+            Some(previous) => std::env::set_var(PLUGIN_PANE_THEME_ENV_VAR, previous),
+            None => std::env::remove_var(PLUGIN_PANE_THEME_ENV_VAR),
+        }
     }
 
     #[cfg(unix)]
     #[test]
     fn event_hooks_use_event_target_context() {
+        let _guard = crate::config::test_config_env_lock().lock().unwrap();
+        let previous_theme = std::env::var_os(PLUGIN_PANE_THEME_ENV_VAR);
+        std::env::set_var(PLUGIN_PANE_THEME_ENV_VAR, "ambient-spoof");
         let mut app = test_app();
         app.state.workspaces = vec![
             crate::workspace::Workspace::test_new("active"),
@@ -2503,7 +2532,7 @@ platforms = ["linux", "macos"]
 
 [[events]]
 on = "worktree.created"
-command = ["sh", "-c", "printf '%s' \"$HERDR_PLUGIN_CONTEXT_JSON\" > {}"]
+command = ["sh", "-c", "printf '%s\n%s' \"$HERDR_PLUGIN_CONTEXT_JSON\" \"${{HERDR_PLUGIN_PANE_THEME_JSON-unset}}\" > {}"]
 "#,
                 capture.display()
             ),
@@ -2527,11 +2556,12 @@ command = ["sh", "-c", "printf '%s' \"$HERDR_PLUGIN_CONTEXT_JSON\" > {}"]
             },
         });
 
-        let context: PluginInvocationContext =
-            serde_json::from_str(&read_capture_when_ready(&capture, || {
-                app.drain_all_internal_events();
-            }))
-            .unwrap();
+        let captured = read_capture_when_ready(&capture, || {
+            app.drain_all_internal_events();
+        });
+        let (context_json, theme) = captured.split_once('\n').unwrap();
+        let context: PluginInvocationContext = serde_json::from_str(context_json).unwrap();
+        assert_eq!(theme, "unset");
         assert_eq!(
             context.workspace_id.as_deref(),
             Some(target_workspace.workspace_id.as_str())
@@ -2542,6 +2572,10 @@ command = ["sh", "-c", "printf '%s' \"$HERDR_PLUGIN_CONTEXT_JSON\" > {}"]
         );
 
         let _ = std::fs::remove_dir_all(root);
+        match previous_theme {
+            Some(previous) => std::env::set_var(PLUGIN_PANE_THEME_ENV_VAR, previous),
+            None => std::env::remove_var(PLUGIN_PANE_THEME_ENV_VAR),
+        }
     }
 
     #[test]
@@ -2703,6 +2737,9 @@ command = ["sh", "-c", "printf '%s' \"$HERDR_PLUGIN_CONTEXT_JSON\" > {}"]
     #[cfg(unix)]
     #[test]
     fn plugin_link_handler_invokes_action_with_clicked_url_context() {
+        let _guard = crate::config::test_config_env_lock().lock().unwrap();
+        let previous_theme = std::env::var_os(PLUGIN_PANE_THEME_ENV_VAR);
+        std::env::set_var(PLUGIN_PANE_THEME_ENV_VAR, "ambient-spoof");
         let mut app = test_app();
         app.state.workspaces = vec![crate::workspace::Workspace::test_new("link-handler")];
         app.state.ensure_test_terminals();
@@ -2722,7 +2759,7 @@ platforms = ["linux", "macos"]
 [[actions]]
 id = "open"
 title = "Open link"
-command = ["sh", "-c", "printf '%s|%s' \"$HERDR_PLUGIN_LINK_HANDLER_ID\" \"$HERDR_PLUGIN_CLICKED_URL\""]
+command = ["sh", "-c", "printf '%s|%s|%s' \"$HERDR_PLUGIN_LINK_HANDLER_ID\" \"$HERDR_PLUGIN_CLICKED_URL\" \"${HERDR_PLUGIN_PANE_THEME_JSON-unset}\""]
 
 [[link_handlers]]
 id = "github-issue"
@@ -2768,10 +2805,14 @@ action = "open"
         assert_eq!(finished.action_id.as_deref(), Some("open"));
         assert_eq!(
             finished.stdout.as_deref(),
-            Some("github-issue|https://github.com/ogulcancelik/herdr/issues/398")
+            Some("github-issue|https://github.com/ogulcancelik/herdr/issues/398|unset")
         );
 
         let _ = std::fs::remove_dir_all(root);
+        match previous_theme {
+            Some(previous) => std::env::set_var(PLUGIN_PANE_THEME_ENV_VAR, previous),
+            None => std::env::remove_var(PLUGIN_PANE_THEME_ENV_VAR),
+        }
     }
 
     #[test]
