@@ -155,16 +155,16 @@ impl App {
         let pane_id = PaneId::alloc();
         let terminal_id = TerminalId::alloc();
         let launch_env = PaneLaunchEnv::from_extra(extra_env).without_pane_identity();
-        let terminal_area = if self.state.view.terminal_area.width >= 4
-            && self.state.view.terminal_area.height >= 4
+        let popup_area = if self.state.view.popup_area().width >= 4
+            && self.state.view.popup_area().height >= 4
         {
-            self.state.view.terminal_area
+            self.state.view.popup_area()
         } else {
             let (estimated_rows, estimated_cols) = self.state.estimate_pane_size();
             ratatui::layout::Rect::new(0, 0, estimated_cols, estimated_rows)
         };
         let Some(resolved_geometry) =
-            resolve_popup_geometry(geometry.width, geometry.height, terminal_area)
+            resolve_popup_geometry(geometry.width, geometry.height, popup_area)
         else {
             return Err(std::io::Error::other("terminal area too small for popup"));
         };
@@ -305,5 +305,39 @@ mod tests {
         let response = app.handle_api_request(close());
         let response: crate::api::schema::ErrorResponse = serde_json::from_str(&response).unwrap();
         assert_eq!(response.error.code, "popup_not_open");
+    }
+
+    #[tokio::test]
+    async fn popup_spawn_sizes_runtime_from_full_frame() {
+        let mut app = app_with_popup();
+        assert!(app.close_popup_pane());
+        app.state.view.full_frame_area = ratatui::layout::Rect::new(0, 0, 100, 30);
+        app.state.view.terminal_area = ratatui::layout::Rect::new(26, 1, 74, 29);
+
+        app.spawn_popup_command(
+            None,
+            Vec::new(),
+            PopupGeometry {
+                width: Some(PopupSize::Percent(50)),
+                height: Some(PopupSize::Percent(50)),
+            },
+            |_, rows, cols, _, _, _| {
+                assert_eq!((rows, cols), (13, 47));
+                Ok((
+                    TerminalRuntime::test_with_screen_bytes(cols, rows, b"popup"),
+                    None,
+                ))
+            },
+        )
+        .expect("spawn popup");
+
+        let popup = app.state.popup_pane.as_ref().expect("popup state");
+        assert_eq!(
+            app.terminal_runtimes
+                .get(&popup.terminal_id)
+                .expect("popup runtime")
+                .current_size(),
+            (13, 47)
+        );
     }
 }

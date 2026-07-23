@@ -583,6 +583,7 @@ impl App {
             mobile_switcher_scroll: 0,
             view: state::ViewState {
                 layout: state::ViewLayout::Desktop,
+                full_frame_area: Rect::default(),
                 sidebar_rect: Rect::default(),
                 workspace_card_areas: Vec::new(),
                 tab_bar_rect: Rect::default(),
@@ -5732,13 +5733,13 @@ last_pane = "prefix+tab"
         app.state.selected = 0;
         app.state.mode = Mode::Terminal;
         app.state.mouse_capture = false;
-        app.state.view.terminal_area = ratatui::layout::Rect::new(0, 0, 80, 24);
+        app.state.view.full_frame_area = ratatui::layout::Rect::new(0, 0, 100, 24);
+        app.state.view.terminal_area = ratatui::layout::Rect::new(20, 1, 80, 23);
 
         let (popup_runtime, mut popup_rx) = TerminalRuntime::test_with_channel(40, 12);
         popup_runtime.test_process_pty_bytes(b"\x1b[?1000h\x1b[?1006h");
         app.install_test_popup_runtime(popup_runtime);
-        let (_, inner) =
-            crate::ui::popup_pane_rects(&app.state, app.state.view.terminal_area).unwrap();
+        let (_, inner) = crate::ui::popup_pane_rects(&app.state).unwrap();
 
         app.route_client_events(
             vec![crate::raw_input::RawInputEvent::Mouse(

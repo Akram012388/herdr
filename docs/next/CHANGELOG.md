@@ -3,6 +3,8 @@
 ## Unreleased
 
 ### Changed
+- Session-modal terminal popups now center and size against the full Herdr client frame and dim the
+  interface behind them, matching native modal presentation.
 - Relicensed Herdr from AGPL-3.0-or-later to Apache-2.0.
 
 ### Fixed

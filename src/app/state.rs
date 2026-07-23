@@ -774,6 +774,8 @@ pub enum ViewLayout {
 
 pub struct ViewState {
     pub layout: ViewLayout,
+    /// Full client frame used by session-modal presentation such as popup panes.
+    pub full_frame_area: Rect,
     pub sidebar_rect: Rect,
     pub workspace_card_areas: Vec<WorkspaceCardArea>,
     pub tab_bar_rect: Rect,
@@ -787,6 +789,16 @@ pub struct ViewState {
     pub toast_hit_area: Rect,
     pub pane_infos: Vec<PaneInfo>,
     pub split_borders: Vec<SplitBorder>,
+}
+
+impl ViewState {
+    pub(crate) fn popup_area(&self) -> Rect {
+        if self.full_frame_area.width >= 4 && self.full_frame_area.height >= 4 {
+            self.full_frame_area
+        } else {
+            self.terminal_area
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1828,6 +1840,7 @@ impl AppState {
             mobile_switcher_scroll: 0,
             view: ViewState {
                 layout: ViewLayout::Desktop,
+                full_frame_area: Rect::default(),
                 sidebar_rect: Rect::default(),
                 workspace_card_areas: Vec::new(),
                 tab_bar_rect: Rect::default(),

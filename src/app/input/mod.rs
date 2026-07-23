@@ -414,9 +414,7 @@ impl App {
     }
 
     fn handle_popup_mouse(&mut self, mouse: MouseEvent) {
-        let Some((_outer, inner)) =
-            crate::ui::popup_pane_rects(&self.state, self.state.view.terminal_area)
-        else {
+        let Some((_outer, inner)) = crate::ui::popup_pane_rects(&self.state) else {
             return;
         };
         if mouse.column < inner.x
@@ -753,6 +751,7 @@ fn app_for_mouse_test() -> App {
     app.state.mode = Mode::Terminal;
     app.state.update_available = None;
     app.state.latest_release_notes_available = false;
+    app.state.view.full_frame_area = ratatui::layout::Rect::new(0, 0, 106, 20);
     app.state.view.sidebar_rect = ratatui::layout::Rect::new(0, 0, 26, 20);
     app.state.view.terminal_area = ratatui::layout::Rect::new(26, 0, 80, 20);
     app

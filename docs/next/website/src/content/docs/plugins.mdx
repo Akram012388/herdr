@@ -294,9 +294,10 @@ closes. A `plugin.pane.open` request can override the manifest placement with
 tiled layout. It accepts optional `width` and `height` fields in the manifest or
 open request; omit them for the default half-size popup, use numbers for outer
 terminal-cell dimensions, or use strings like `"80%"` for a percentage of the
-terminal area. It receives all terminal input, including Escape, and closes
-when the command exits or a `popup.close` request is sent. Dimensions smaller
-than the popup minimum are clamped.
+full Herdr client frame. The popup is centered across the complete frame and
+dims the sidebar, tab bar, and tiled panes behind it. It receives all terminal
+input, including Escape, and closes when the command exits or a `popup.close`
+request is sent. Dimensions smaller than the popup minimum are clamped.
 
 Declare the placement directly on a plugin pane entrypoint when the pane should
 always be transient:

@@ -367,22 +367,21 @@ pub(super) fn render_panes(
     render_pane_borders(app, ws, pane_infos, split_borders, frame);
 }
 
-pub(crate) fn popup_pane_rects(app: &AppState, area: Rect) -> Option<(Rect, Rect)> {
+pub(crate) fn popup_pane_rects(app: &AppState) -> Option<(Rect, Rect)> {
     let popup = app.popup_pane.as_ref()?;
-    resolve_popup_geometry(popup.width, popup.height, area)
+    resolve_popup_geometry(popup.width, popup.height, app.view.popup_area())
         .map(|geometry| (geometry.outer, geometry.inner))
 }
 
 pub(super) fn resize_popup_pane(
     app: &AppState,
     terminal_runtimes: &TerminalRuntimeRegistry,
-    area: Rect,
     cell_size: crate::kitty_graphics::HostCellSize,
 ) {
     let Some(popup) = app.popup_pane.as_ref() else {
         return;
     };
-    let Some((_outer, inner)) = popup_pane_rects(app, area) else {
+    let Some((_outer, inner)) = popup_pane_rects(app) else {
         return;
     };
     if app.direct_attach_resize_locks.contains(&popup.terminal_id) {
@@ -402,12 +401,11 @@ pub(super) fn render_popup_pane(
     app: &AppState,
     terminal_runtimes: &TerminalRuntimeRegistry,
     frame: &mut Frame,
-    area: Rect,
 ) {
     let Some(popup) = app.popup_pane.as_ref() else {
         return;
     };
-    let Some((outer, inner)) = popup_pane_rects(app, area) else {
+    let Some((outer, inner)) = popup_pane_rects(app) else {
         return;
     };
     let Some(rt) = terminal_runtimes.get(&popup.terminal_id) else {

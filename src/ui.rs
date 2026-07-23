@@ -215,6 +215,10 @@ fn compute_view_internal(
     resize_panes: bool,
     cell_size: crate::kitty_graphics::HostCellSize,
 ) {
+    // Popup PTY sizing happens during view computation, so publish the current
+    // client frame before either desktop or mobile resize paths consume it.
+    app.view.full_frame_area = area;
+
     if is_mobile_width(area, app.mobile_width_threshold) {
         compute_mobile_view(app, terminal_runtimes, area, resize_panes, cell_size);
         return;
@@ -284,7 +288,7 @@ fn compute_view_internal(
     );
     if resize_panes {
         resize_background_tab_panes_for_desktop(app, terminal_runtimes, main_area, cell_size);
-        resize_popup_pane(app, terminal_runtimes, terminal_area, cell_size);
+        resize_popup_pane(app, terminal_runtimes, cell_size);
     }
 
     let toast_hit_area = app
@@ -302,6 +306,7 @@ fn compute_view_internal(
 
     app.view = crate::app::ViewState {
         layout: ViewLayout::Desktop,
+        full_frame_area: area,
         sidebar_rect: sidebar_area,
         workspace_card_areas,
         tab_bar_rect,
@@ -353,7 +358,7 @@ fn compute_mobile_view(
     );
     if resize_panes {
         resize_background_tab_panes_to_area(app, terminal_runtimes, terminal_area, cell_size);
-        resize_popup_pane(app, terminal_runtimes, terminal_area, cell_size);
+        resize_popup_pane(app, terminal_runtimes, cell_size);
     }
     let header_hits = compute_mobile_header_hit_areas(app, header_rect);
 
@@ -365,6 +370,7 @@ fn compute_mobile_view(
 
     app.view = crate::app::ViewState {
         layout: ViewLayout::Mobile,
+        full_frame_area: area,
         sidebar_rect: Rect::default(),
         workspace_card_areas: Vec::new(),
         tab_bar_rect: Rect::default(),
@@ -422,7 +428,10 @@ pub fn render_with_runtime_registry(
 
     // Ambient notifications sit above panes, but below interactive overlays.
     render_notifications(app, frame, terminal_area);
-    render_popup_pane(app, terminal_runtimes, frame, terminal_area);
+    if app.popup_pane.is_some() {
+        dim_background(frame, frame.area());
+    }
+    render_popup_pane(app, terminal_runtimes, frame);
 
     match app.mode {
         Mode::Onboarding => render_onboarding_overlay(app, frame, frame.area()),
@@ -579,7 +588,7 @@ mod tests {
     use super::scrollbar::scrollbar_thumb;
     use super::*;
     use crate::{app::state::ViewLayout, layout::PaneInfo, workspace::Workspace};
-    use ratatui::style::Color;
+    use ratatui::style::{Color, Modifier};
     use ratatui::{backend::TestBackend, Terminal};
 
     #[test]
@@ -771,6 +780,64 @@ mod tests {
 
         assert_eq!(app.view.toast_hit_area.x, 0);
         assert_eq!(app.view.toast_hit_area.y, 1);
+    }
+
+    #[tokio::test]
+    async fn popup_pane_centers_on_full_frame_resizes_and_dims_background() {
+        let mut app = crate::app::state::AppState::test_new();
+        app.workspaces = vec![Workspace::test_new("one")];
+        app.active = Some(0);
+        app.selected = 0;
+        app.mode = Mode::Terminal;
+
+        let popup_terminal_id = crate::terminal::TerminalId::alloc();
+        app.terminals.insert(
+            popup_terminal_id.clone(),
+            crate::terminal::TerminalState::new(
+                popup_terminal_id.clone(),
+                std::path::PathBuf::from("/popup"),
+            ),
+        );
+        app.popup_pane = Some(crate::app::state::PopupPaneState {
+            pane_id: crate::layout::PaneId::alloc(),
+            terminal_id: popup_terminal_id.clone(),
+            width: Some(crate::popup_size::PopupSize::Percent(50)),
+            height: Some(crate::popup_size::PopupSize::Percent(50)),
+        });
+
+        let mut terminal_runtimes = crate::terminal::TerminalRuntimeRegistry::new();
+        terminal_runtimes.insert(
+            popup_terminal_id.clone(),
+            crate::terminal::TerminalRuntime::test_with_screen_bytes(10, 4, b"popup"),
+        );
+
+        let area = Rect::new(0, 0, 100, 30);
+        compute_view_with_runtime_registry(&mut app, &terminal_runtimes, area);
+
+        assert_eq!(app.view.full_frame_area, area);
+        assert_eq!(app.view.terminal_area, Rect::new(26, 1, 74, 29));
+        let (outer, inner) = popup_pane_rects(&app).expect("popup geometry");
+        assert_eq!(outer, Rect::new(25, 7, 50, 15));
+        assert_eq!(inner, Rect::new(26, 8, 47, 13));
+        assert_eq!(
+            terminal_runtimes
+                .get(&popup_terminal_id)
+                .expect("popup runtime")
+                .current_size(),
+            (13, 47)
+        );
+
+        let mut terminal = Terminal::new(TestBackend::new(area.width, area.height)).unwrap();
+        terminal
+            .draw(|frame| render_with_runtime_registry(&app, &terminal_runtimes, frame))
+            .unwrap();
+        let buffer = terminal.backend().buffer();
+
+        assert!(buffer[(0, 0)].style().add_modifier.contains(Modifier::DIM));
+        assert!(!buffer[(outer.x, outer.y)]
+            .style()
+            .add_modifier
+            .contains(Modifier::DIM));
     }
 
     #[test]

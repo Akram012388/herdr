@@ -1995,11 +1995,11 @@ command = ["sh", "-c", "printf %s ${{HERDR_PANE_ID-unset}} > '{}'; sleep 1"]
         let opened_pane_id = app.state.popup_pane.as_ref().unwrap().pane_id;
         assert!(!app.state.plugin_panes.contains_key(&opened_pane_id));
         app.state.assert_invariants_for_test();
-        app.state.view.terminal_area = ratatui::layout::Rect::new(0, 0, 100, 30);
-        let (outer, inner) = crate::ui::popup_pane_rects(&app.state, app.state.view.terminal_area)
-            .expect("popup rects");
-        assert_eq!((outer.width, outer.height), (80, 12));
-        assert_eq!((inner.width, inner.height), (77, 10));
+        app.state.view.full_frame_area = ratatui::layout::Rect::new(0, 0, 120, 30);
+        app.state.view.terminal_area = ratatui::layout::Rect::new(20, 1, 100, 29);
+        let (outer, inner) = crate::ui::popup_pane_rects(&app.state).expect("popup rects");
+        assert_eq!(outer, ratatui::layout::Rect::new(12, 9, 96, 12));
+        assert_eq!(inner, ratatui::layout::Rect::new(13, 10, 93, 10));
         assert_eq!(app.state.workspaces[0].tabs[0].layout.pane_count(), 1);
         assert!(!app.state.workspaces[0].tabs[0].zoomed);
 

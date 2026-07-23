@@ -8083,9 +8083,7 @@ next_tab = ""
             true,
             crate::kitty_graphics::HostCellSize::default(),
         );
-        let (_, inner) =
-            crate::ui::popup_pane_rects(&server.app.state, server.app.state.view.terminal_area)
-                .unwrap();
+        let (_, inner) = crate::ui::popup_pane_rects(&server.app.state).unwrap();
         let expected = server
             .app
             .terminal_runtimes

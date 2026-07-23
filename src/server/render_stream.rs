@@ -354,7 +354,7 @@ fn popup_terminal_cursor(
     if runtime.synchronized_output_active() {
         return None;
     }
-    let (_, inner) = crate::ui::popup_pane_rects(app_state, app_state.view.terminal_area)?;
+    let (_, inner) = crate::ui::popup_pane_rects(app_state)?;
     let cursor = runtime.cursor_state(inner, true)?;
     Some(CursorState {
         x: cursor.x,
