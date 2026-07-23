@@ -1,4 +1,6 @@
 use ratatui::layout::Direction;
+use ratatui::style::Color;
+use serde::Serialize;
 
 use super::super::responses::{encode_error, encode_success};
 use crate::api::schema::{
@@ -6,6 +8,102 @@ use crate::api::schema::{
     PluginPaneOpenParams, PluginPanePlacement, ResponseResult,
 };
 use crate::app::App;
+
+#[derive(Serialize)]
+struct PluginPaneThemeSnapshot<'a> {
+    schema_version: u8,
+    name: &'a str,
+    palette: PluginPanePaletteSnapshot,
+}
+
+#[derive(Serialize)]
+struct PluginPanePaletteSnapshot {
+    accent: PluginPaneColor,
+    panel_bg: PluginPaneColor,
+    surface0: PluginPaneColor,
+    surface1: PluginPaneColor,
+    surface_dim: PluginPaneColor,
+    overlay0: PluginPaneColor,
+    overlay1: PluginPaneColor,
+    text: PluginPaneColor,
+    subtext0: PluginPaneColor,
+    mauve: PluginPaneColor,
+    green: PluginPaneColor,
+    yellow: PluginPaneColor,
+    red: PluginPaneColor,
+    blue: PluginPaneColor,
+    teal: PluginPaneColor,
+    peach: PluginPaneColor,
+}
+
+#[derive(Debug, PartialEq, Eq, Serialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+enum PluginPaneColor {
+    Reset,
+    Ansi { name: &'static str },
+    Indexed { index: u8 },
+    Rgb { r: u8, g: u8, b: u8 },
+}
+
+impl From<Color> for PluginPaneColor {
+    fn from(color: Color) -> Self {
+        match color {
+            Color::Reset => Self::Reset,
+            Color::Black => Self::Ansi { name: "black" },
+            Color::Red => Self::Ansi { name: "red" },
+            Color::Green => Self::Ansi { name: "green" },
+            Color::Yellow => Self::Ansi { name: "yellow" },
+            Color::Blue => Self::Ansi { name: "blue" },
+            Color::Magenta => Self::Ansi { name: "magenta" },
+            Color::Cyan => Self::Ansi { name: "cyan" },
+            Color::Gray => Self::Ansi { name: "gray" },
+            Color::DarkGray => Self::Ansi { name: "dark_gray" },
+            Color::LightRed => Self::Ansi { name: "light_red" },
+            Color::LightGreen => Self::Ansi {
+                name: "light_green",
+            },
+            Color::LightYellow => Self::Ansi {
+                name: "light_yellow",
+            },
+            Color::LightBlue => Self::Ansi { name: "light_blue" },
+            Color::LightMagenta => Self::Ansi {
+                name: "light_magenta",
+            },
+            Color::LightCyan => Self::Ansi { name: "light_cyan" },
+            Color::White => Self::Ansi { name: "white" },
+            Color::Indexed(index) => Self::Indexed { index },
+            Color::Rgb(r, g, b) => Self::Rgb { r, g, b },
+        }
+    }
+}
+
+impl<'a> PluginPaneThemeSnapshot<'a> {
+    fn from_state(state: &'a crate::app::state::AppState) -> Self {
+        let palette = &state.palette;
+        Self {
+            schema_version: 1,
+            name: &state.theme_name,
+            palette: PluginPanePaletteSnapshot {
+                accent: palette.accent.into(),
+                panel_bg: palette.panel_bg.into(),
+                surface0: palette.surface0.into(),
+                surface1: palette.surface1.into(),
+                surface_dim: palette.surface_dim.into(),
+                overlay0: palette.overlay0.into(),
+                overlay1: palette.overlay1.into(),
+                text: palette.text.into(),
+                subtext0: palette.subtext0.into(),
+                mauve: palette.mauve.into(),
+                green: palette.green.into(),
+                yellow: palette.yellow.into(),
+                red: palette.red.into(),
+                blue: palette.blue.into(),
+                teal: palette.teal.into(),
+                peach: palette.peach.into(),
+            },
+        }
+    }
+}
 
 impl App {
     pub(super) fn open_plugin_popup_pane(
@@ -237,6 +335,9 @@ impl App {
         let mut env = super::super::env::normalize_launch_env(env)?;
         let context_json = serde_json::to_string(&context)
             .map_err(|err| ("invalid_plugin_context".to_string(), err.to_string()))?;
+        let theme_json =
+            serde_json::to_string(&PluginPaneThemeSnapshot::from_state(&self.state))
+                .map_err(|err| ("invalid_plugin_pane_theme".to_string(), err.to_string()))?;
         super::env::ensure_plugin_user_dirs(plugin)
             .map_err(|err| ("plugin_user_dir_create_failed".to_string(), err.to_string()))?;
         env.retain(|(key, _)| !plugin_pane_protected_env_key(key));
@@ -252,6 +353,7 @@ impl App {
             entrypoint.to_string(),
         ));
         env.push(("HERDR_PLUGIN_CONTEXT_JSON".to_string(), context_json));
+        env.push((super::PLUGIN_PANE_THEME_ENV_VAR.to_string(), theme_json));
         if let Ok(current_exe) = std::env::current_exe() {
             env.push((
                 "HERDR_BIN_PATH".to_string(),
@@ -346,6 +448,110 @@ fn plugin_pane_protected_env_key(key: &str) -> bool {
             | "HERDR_PLUGIN_STATE_DIR"
             | "HERDR_PLUGIN_ENTRYPOINT_ID"
             | "HERDR_PLUGIN_CONTEXT_JSON"
+            | super::PLUGIN_PANE_THEME_ENV_VAR
             | "HERDR_BIN_PATH"
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::app::state::Palette;
+
+    #[test]
+    fn plugin_pane_color_serialization_preserves_every_color_variant() {
+        let ansi = [
+            (Color::Black, "black"),
+            (Color::Red, "red"),
+            (Color::Green, "green"),
+            (Color::Yellow, "yellow"),
+            (Color::Blue, "blue"),
+            (Color::Magenta, "magenta"),
+            (Color::Cyan, "cyan"),
+            (Color::Gray, "gray"),
+            (Color::DarkGray, "dark_gray"),
+            (Color::LightRed, "light_red"),
+            (Color::LightGreen, "light_green"),
+            (Color::LightYellow, "light_yellow"),
+            (Color::LightBlue, "light_blue"),
+            (Color::LightMagenta, "light_magenta"),
+            (Color::LightCyan, "light_cyan"),
+            (Color::White, "white"),
+        ];
+        assert_eq!(
+            serde_json::to_value(PluginPaneColor::from(Color::Reset)).unwrap(),
+            serde_json::json!({"kind": "reset"})
+        );
+        for (color, name) in ansi {
+            assert_eq!(
+                serde_json::to_value(PluginPaneColor::from(color)).unwrap(),
+                serde_json::json!({"kind": "ansi", "name": name})
+            );
+        }
+        assert_eq!(
+            serde_json::to_value(PluginPaneColor::from(Color::Indexed(231))).unwrap(),
+            serde_json::json!({"kind": "indexed", "index": 231})
+        );
+        assert_eq!(
+            serde_json::to_value(PluginPaneColor::from(Color::Rgb(1, 2, 3))).unwrap(),
+            serde_json::json!({"kind": "rgb", "r": 1, "g": 2, "b": 3})
+        );
+    }
+
+    #[test]
+    fn plugin_pane_theme_serializes_effective_name_and_all_palette_fields() {
+        let mut state = crate::app::state::AppState::test_new();
+        state.theme_name = "effective-custom".to_string();
+        state.palette = Palette {
+            accent: Color::Reset,
+            panel_bg: Color::Black,
+            surface0: Color::Red,
+            surface1: Color::Green,
+            surface_dim: Color::Yellow,
+            overlay0: Color::Blue,
+            overlay1: Color::Magenta,
+            text: Color::Cyan,
+            subtext0: Color::Gray,
+            mauve: Color::DarkGray,
+            green: Color::LightRed,
+            yellow: Color::LightGreen,
+            red: Color::LightYellow,
+            blue: Color::LightBlue,
+            teal: Color::Indexed(42),
+            peach: Color::Rgb(7, 8, 9),
+        };
+        let value = serde_json::to_value(PluginPaneThemeSnapshot::from_state(&state)).unwrap();
+        assert_eq!(
+            value,
+            serde_json::json!({
+                "schema_version": 1,
+                "name": "effective-custom",
+                "palette": {
+                    "accent": {"kind":"reset"},
+                    "panel_bg": {"kind":"ansi","name":"black"},
+                    "surface0": {"kind":"ansi","name":"red"},
+                    "surface1": {"kind":"ansi","name":"green"},
+                    "surface_dim": {"kind":"ansi","name":"yellow"},
+                    "overlay0": {"kind":"ansi","name":"blue"},
+                    "overlay1": {"kind":"ansi","name":"magenta"},
+                    "text": {"kind":"ansi","name":"cyan"},
+                    "subtext0": {"kind":"ansi","name":"gray"},
+                    "mauve": {"kind":"ansi","name":"dark_gray"},
+                    "green": {"kind":"ansi","name":"light_red"},
+                    "yellow": {"kind":"ansi","name":"light_green"},
+                    "red": {"kind":"ansi","name":"light_yellow"},
+                    "blue": {"kind":"ansi","name":"light_blue"},
+                    "teal": {"kind":"indexed","index":42},
+                    "peach": {"kind":"rgb","r":7,"g":8,"b":9}
+                }
+            })
+        );
+    }
+
+    #[test]
+    fn plugin_pane_theme_env_is_protected() {
+        assert!(plugin_pane_protected_env_key(
+            super::super::PLUGIN_PANE_THEME_ENV_VAR
+        ));
+    }
 }

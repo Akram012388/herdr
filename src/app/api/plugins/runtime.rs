@@ -121,6 +121,9 @@ impl App {
         std::thread::spawn(move || {
             let child = crate::plugin_command::command_for_argv(&program, &args)
                 .current_dir(plugin_root)
+                // This is a pane-presentation snapshot, never ambient context for action/event/
+                // startup/link-handler commands. Scrub a value inherited by the Herdr process.
+                .env_remove(super::PLUGIN_PANE_THEME_ENV_VAR)
                 .envs(env)
                 .stdout(Stdio::piped())
                 .stderr(Stdio::piped())
