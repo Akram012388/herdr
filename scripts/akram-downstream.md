@@ -47,7 +47,9 @@ The update command:
 If the rebase fails, it is aborted and the source branch returns to its pre-update state. If live
 handoff fails while the old server remains active, the installed binary is restored automatically.
 Live handoff preserves pane processes but disconnects attached TUI clients; run `herdr` to reattach.
-The scripts do not release or push anything.
+If the installed binary is already current but the running server is stale, `install` repairs the
+server with the current binary instead of treating the operation as complete. The scripts do not
+release or push anything.
 
 Inspect or reverse the managed install explicitly:
 

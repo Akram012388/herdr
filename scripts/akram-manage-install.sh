@@ -247,14 +247,8 @@ install_candidate() {
   validate_binary "$install_path"
   validate_candidate
 
-  installed_sha="$(binary_sha256 "$install_path")"
-  candidate_sha="$(binary_sha256 "$candidate_bin")"
-  if [[ "$installed_sha" == "$candidate_sha" ]]; then
-    printf 'already installed: %s\n' "$(binary_version "$candidate_bin")"
-    print_status
-    return
-  fi
-
+  candidate_version="$(binary_version "$candidate_bin")"
+  candidate_protocol="$(binary_protocol "$candidate_bin")"
   server_running=false
   handoff_supported=false
   old_version=""
@@ -266,13 +260,29 @@ install_candidate() {
     old_version="$(printf '%s' "$status_json" | json_field version)"
     old_protocol="$(printf '%s' "$status_json" | json_field protocol)"
   fi
+
+  installed_sha="$(binary_sha256 "$install_path")"
+  candidate_sha="$(binary_sha256 "$candidate_bin")"
+  if [[ "$installed_sha" == "$candidate_sha" ]]; then
+    printf 'already installed: %s\n' "$candidate_version"
+    if [[ "$server_running" == "true" &&
+      ("$old_version" != "$candidate_version" || "$old_protocol" != "$candidate_protocol") ]]; then
+      [[ "$handoff_supported" == "true" ]] ||
+        fail "the installed binary is current but the stale running server cannot live-handoff"
+      printf 'repairing stale server %s/protocol %s...\n' "$old_version" "$old_protocol"
+      handoff_to "$install_path" "$install_path" "$candidate_version" "$candidate_protocol" ||
+        fail "the installed binary is current but the stale running server could not be repaired"
+      printf 'live handoff disconnects attached TUI clients; reconnect with: herdr\n'
+    fi
+    print_status
+    return
+  fi
+
   if [[ "$server_running" == "true" && "$handoff_supported" != "true" ]]; then
     fail "the running server cannot live-handoff; installation was not changed"
   fi
 
   backup_path="$(create_backup "$install_path")"
-  candidate_version="$(binary_version "$candidate_bin")"
-  candidate_protocol="$(binary_protocol "$candidate_bin")"
   printf 'backup: %s\n' "$backup_path"
   atomic_replace "$candidate_bin" "$install_path"
   printf 'installed: %s\n' "$candidate_version"
