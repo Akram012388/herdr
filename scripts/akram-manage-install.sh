@@ -6,6 +6,7 @@ candidate_bin="${HERDR_AKRAM_CANDIDATE_BIN:-$repo_root/target/release/herdr}"
 state_dir="${HERDR_AKRAM_STATE_DIR:-${XDG_STATE_HOME:-${HOME:?}/.local/state}/herdr-akram}"
 backup_dir="$state_dir/backups"
 latest_backup_file="$state_dir/latest-backup"
+keep_backups="${HERDR_AKRAM_KEEP_BACKUPS:-5}"
 
 usage() {
   cat <<'EOF'
@@ -17,11 +18,15 @@ commands:
   rollback [backup]   restore the latest backup, or the specified backup
   update              sync/rebase/build, then install the validated candidate
   backups             list managed binary backups
+  prune [keep]        drop old downstream backups and source backup refs,
+                      keeping the newest [keep] (default 5); official baselines
+                      and the active rollback target are never pruned
 
 environment:
   HERDR_AKRAM_INSTALL_PATH   installed binary to manage (default: selected herdr on PATH)
   HERDR_AKRAM_CANDIDATE_BIN candidate binary (default: target/release/herdr)
   HERDR_AKRAM_STATE_DIR     backup state directory
+  HERDR_AKRAM_KEEP_BACKUPS  how many downstream backups prune keeps (default 5)
 EOF
 }
 
@@ -301,6 +306,7 @@ install_candidate() {
     printf 'live handoff disconnects attached TUI clients; reconnect with: herdr\n'
   fi
 
+  prune_backups
   print_status
 }
 
@@ -380,6 +386,43 @@ list_backups() {
   [[ "$found" == "true" ]] || printf 'no managed backups\n'
 }
 
+# Backup names embed the recorded version (herdr-<timestamp>-<version>), so retention is decided
+# from filenames alone and never executes archived binaries. Official (non "-akram.") baselines
+# and the active rollback target are always retained.
+prune_backups() {
+  local keep="${1:-$keep_backups}"
+  [[ "$keep" =~ ^[1-9][0-9]*$ ]] || fail "prune keep count must be a positive integer: $keep"
+  local latest path kept=0 removed=0
+  latest="$(cat "$latest_backup_file" 2>/dev/null || true)"
+  if [[ -d "$backup_dir" ]]; then
+    while IFS= read -r path; do
+      if [[ "$(basename "$path")" != *-akram.* ]]; then
+        continue
+      fi
+      if [[ -n "$latest" && "$path" == "$latest" ]]; then
+        continue
+      fi
+      kept=$((kept + 1))
+      if ((kept > keep)); then
+        rm -f "$path" "${path}.meta"
+        printf 'pruned backup: %s\n' "$path"
+        removed=$((removed + 1))
+      fi
+    done < <(find "$backup_dir" -maxdepth 1 -type f ! -name '*.meta' | sort -r)
+  fi
+  local ref refs_kept=0
+  while IFS= read -r ref; do
+    [[ -n "$ref" ]] || continue
+    refs_kept=$((refs_kept + 1))
+    if ((refs_kept > keep)); then
+      git -C "$repo_root" update-ref -d "$ref"
+      printf 'pruned source backup ref: %s\n' "$ref"
+      removed=$((removed + 1))
+    fi
+  done < <(git -C "$repo_root" for-each-ref 'refs/akram-backups' --format='%(refname)' | sort -r)
+  ((removed > 0)) || printf 'nothing to prune (keeping newest %s)\n' "$keep"
+}
+
 command="${1:-}"
 case "$command" in
 status)
@@ -417,6 +460,13 @@ backups)
     exit 2
   }
   list_backups
+  ;;
+prune)
+  [[ $# -le 2 ]] || {
+    usage
+    exit 2
+  }
+  prune_backups "${2:-}"
   ;;
 *)
   usage
