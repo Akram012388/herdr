@@ -28,21 +28,32 @@ event, startup, and link-handler processes explicitly remove it.
 The downstream binary rejects `herdr update` and `herdr channel set` so official-channel update
 paths cannot silently replace the fork.
 
-Update, validate, back up the installed binary, and switch the running server from the checkout:
+The canonical entry point is the smart wrapper (aliased as `herdr-akram-update`):
 
 ```sh
-cd ~/Learning/Projects/herdr-codeakram/herdr
-./scripts/akram-manage-install.sh update
+./scripts/akram-update.sh          # full update
+./scripts/akram-update.sh --check  # dry run: report only, change nothing
 ```
 
-The update command:
+The wrapper refuses to run inside a Herdr pane (`HERDR_ENV` is set; live handoff would disconnect
+the driving session), fast-paths to a status report when `akram` already contains
+`upstream/master`, stamps a date-based downstream identity (`HERDR_BUILD_ID=$(date -u
++%Y%m%dT%H%M)`, so every candidate version is self-dating and traceable), delegates to
+`akram-manage-install.sh update`, pushes the rebased stack with `git push --force-with-lease
+origin akram` on success, and reports theme-branch drift: a `git merge-tree` test says whether
+`feature/plugin-pane-theme` still rebases cleanly onto `upstream/master`. The wrapper never
+rebases that branch itself; rebase it manually when the drift report warns of conflicts or when
+upstream approval arrives.
+
+`akram-manage-install.sh update` remains the manual/debugging path. It:
 
 1. records the current source commit under `refs/akram-backups/`;
 2. fetches `upstream/master` and rebases the clean `akram` patch stack;
 3. runs formatting, clippy, and the complete serialized test suite;
 4. builds and verifies the downstream identity;
 5. copies the selected installed `herdr` binary into the managed backup directory;
-6. atomically installs the candidate and live-handoffs the running server.
+6. atomically installs the candidate and live-handoffs the running server;
+7. prunes old downstream backups after a successful install.
 
 If the rebase fails, it is aborted and the source branch returns to its pre-update state. If live
 handoff fails while the old server remains active, the installed binary is restored automatically.
@@ -57,6 +68,7 @@ Inspect or reverse the managed install explicitly:
 ./scripts/akram-manage-install.sh status
 ./scripts/akram-manage-install.sh backups
 ./scripts/akram-manage-install.sh rollback
+./scripts/akram-manage-install.sh prune [keep]
 ```
 
 By default, backups live under `${XDG_STATE_HOME:-~/.local/state}/herdr-akram`. Override exact paths
@@ -65,5 +77,11 @@ with `HERDR_AKRAM_INSTALL_PATH`, `HERDR_AKRAM_CANDIDATE_BIN`, or
 to the `herdr` currently selected on `PATH`; an overridden test or alternate install path cannot
 handoff an unrelated running session.
 
-Increment `HERDR_BUILD_ID` for a later downstream candidate. Publication and the eventual upstream
-contribution remain separate, explicitly approved operations.
+Backups do not grow without bound: every successful install prunes to the newest
+`HERDR_AKRAM_KEEP_BACKUPS` (default 5) downstream binaries and `refs/akram-backups/` source refs.
+Official (non `-akram.`) baseline backups and the active rollback target are never pruned, so the
+path back to stock Herdr always survives.
+
+The wrapper stamps `HERDR_BUILD_ID` from the UTC sync time, so no manual increment is needed; two
+syncs on the same upstream base still produce distinguishable versions. Publication and the
+eventual upstream contribution remain separate, explicitly approved operations.
