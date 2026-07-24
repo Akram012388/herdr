@@ -48,9 +48,15 @@ fi
 printf 'Fetching official Herdr upstream...\n'
 git fetch upstream --prune --tags
 
-printf 'Rebasing the Akram patch stack onto upstream/master...\n'
+sync_target="${HERDR_AKRAM_SYNC_TARGET:-upstream/master}"
+if ! git rev-parse --verify --quiet "${sync_target}^{commit}" >/dev/null; then
+  printf 'error: sync target is not a resolvable commit: %s\n' "$sync_target" >&2
+  exit 1
+fi
+
+printf 'Rebasing the Akram patch stack onto %s...\n' "$sync_target"
 rebase_started=true
-git rebase upstream/master
+git rebase "$sync_target"
 rebase_started=false
 
 printf 'Validating the rebased integration branch...\n'

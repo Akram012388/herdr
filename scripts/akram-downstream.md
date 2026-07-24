@@ -31,9 +31,17 @@ paths cannot silently replace the fork.
 The canonical entry point is the smart wrapper (aliased as `herdr-akram-update`):
 
 ```sh
-./scripts/akram-update.sh          # full update
-./scripts/akram-update.sh --check  # dry run: report only, change nothing
+./scripts/akram-update.sh            # sync onto the upstream/master tip
+./scripts/akram-update.sh --release  # sync onto the newest upstream release tag
+./scripts/akram-update.sh --check    # dry run: report only, change nothing
 ```
+
+The intended cadence is release-driven: run `--check` freely for awareness, run `--release` when it
+announces a new upstream release, and reserve the master-tip mode for opportunistic pulls or for
+validating an in-flight stack. Every mode prints a release report (the downstream binary rejects
+the official update checker, so this report is the only new-release signal). Release mode refuses
+to run when the stack already contains the latest tag, since rebasing onto an already-contained
+tag would rewind the base.
 
 The wrapper refuses to run inside a Herdr pane (`HERDR_ENV` is set; live handoff would disconnect
 the driving session), fast-paths to a status report when `akram` already contains
