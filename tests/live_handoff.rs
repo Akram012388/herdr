@@ -1225,10 +1225,14 @@ fn live_handoff_keeps_unmanaged_agent_name_bound_to_saved_session() {
     let started_marker = base.join("agent-started");
     let fake_pi = base.join("pi");
     fs::create_dir_all(&base).unwrap();
+    // Downstream: the fake agent must exec a non-platform binary. Current macOS strips the
+    // environment block from sysctl(KERN_PROCARGS2) for Apple platform binaries such as
+    // /bin/sleep, so the upstream fake agent's HERDR_AGENT hint is never visible to foreground
+    // detection and process binding cannot succeed. Homebrew's python3 keeps env readable.
     fs::write(
         &fake_pi,
         format!(
-            "#!/bin/sh\nexport HERDR_AGENT=pi\necho started > {}\nexec /bin/sleep 30\n",
+            "#!/bin/sh\nexport HERDR_AGENT=pi\necho started > {}\nexec /opt/homebrew/bin/python3 -c 'import time; time.sleep(30)'\n",
             started_marker.display()
         ),
     )
