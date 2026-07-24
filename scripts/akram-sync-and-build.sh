@@ -55,10 +55,17 @@ rebase_started=false
 
 printf 'Validating the rebased integration branch...\n'
 cargo fmt --check
-ZIG="$zig" cargo clippy --all-targets --locked -- -D warnings
+# Validate as a stock build: the downstream identity is compile-time (option_env! in
+# build_info.rs), and letting HERDR_BUILD_CHANNEL leak into test compilation flips
+# channel-gated behavior that upstream tests assert against.
+env -u HERDR_BUILD_CHANNEL -u HERDR_BUILD_ID \
+  ZIG="$zig" cargo clippy --all-targets --locked -- -D warnings
 # Serialize the complete suite: some configuration tests mutate process-wide environment state.
 # Keep integration tests included so a broken upstream sync never produces an approved build.
-ZIG="$zig" cargo test --locked -- --test-threads=1
+# stdin comes from /dev/null: some update tests assert a noninteractive stdin, so a run from a
+# real terminal must not behave differently from a scripted one.
+env -u HERDR_BUILD_CHANNEL -u HERDR_BUILD_ID \
+  ZIG="$zig" cargo test --locked -- --test-threads=1 </dev/null
 HERDR_BUILD_CHANNEL="$build_channel" HERDR_BUILD_ID="$build_id" \
   ZIG="$zig" cargo build --release --locked
 

@@ -45,6 +45,13 @@ origin akram` on success, and reports theme-branch drift: a `git merge-tree` tes
 rebases that branch itself; rebase it manually when the drift report warns of conflicts or when
 upstream approval arrives.
 
+The wrapper records the exact commit that passed the full suite in the state directory
+(`last-validated-commit`) and only fast-paths or pushes when the current `akram` head matches it,
+so a rebase whose validation failed mid-run always re-enters the full update. Validation itself
+runs as a stock build (the downstream `HERDR_BUILD_CHANNEL`/`HERDR_BUILD_ID` identity is scrubbed
+from clippy and the test suite, and test stdin is `/dev/null`); the identity applies only to the
+release build.
+
 `akram-manage-install.sh update` remains the manual/debugging path. It:
 
 1. records the current source commit under `refs/akram-backups/`;

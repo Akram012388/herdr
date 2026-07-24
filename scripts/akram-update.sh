@@ -10,6 +10,8 @@ set -euo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 manage="$repo_root/scripts/akram-manage-install.sh"
 theme_branch="feature/plugin-pane-theme"
+state_dir="${HERDR_AKRAM_STATE_DIR:-${XDG_STATE_HOME:-${HOME:?}/.local/state}/herdr-akram}"
+marker_file="$state_dir/last-validated-commit"
 
 usage() {
   cat <<'EOF'
@@ -102,16 +104,25 @@ push_stack() {
   git push --force-with-lease origin akram
 }
 
-if git merge-base --is-ancestor upstream/master akram; then
-  printf 'akram already contains upstream/master; no sync needed.\n'
-  push_stack
-  theme_drift_report
-  "$manage" status
-  exit 0
-fi
+# The fast path requires both no new upstream commits AND a validation marker for the exact
+# current head: a rebase whose validation failed mid-run must re-enter the full update, never
+# get skipped or pushed as if it had been approved.
+head_commit="$(git rev-parse akram)"
+validated_commit="$(cat "$marker_file" 2>/dev/null || true)"
 
-behind_upstream="$(git rev-list --count akram..upstream/master)"
-printf 'upstream/master has %s new commits.\n' "$behind_upstream"
+if git merge-base --is-ancestor upstream/master akram; then
+  if [[ "$validated_commit" == "$head_commit" ]]; then
+    printf 'akram already contains upstream/master and this commit passed validation; nothing to sync.\n'
+    push_stack
+    theme_drift_report
+    "$manage" status
+    exit 0
+  fi
+  printf 'akram already contains upstream/master, but this commit has not passed validation; running the full update.\n'
+else
+  behind_upstream="$(git rev-list --count akram..upstream/master)"
+  printf 'upstream/master has %s new commits.\n' "$behind_upstream"
+fi
 
 if [[ "$check_only" == "true" ]]; then
   printf 'check mode: a real run would rebase, run the full serialized suite, build,\n'
@@ -129,5 +140,7 @@ printf 'Note: live handoff will disconnect attached Herdr TUI clients (panes sur
 
 HERDR_BUILD_CHANNEL=akram HERDR_BUILD_ID="$build_id" "$manage" update
 
+mkdir -p "$state_dir"
+git rev-parse akram >"$marker_file"
 push_stack
 theme_drift_report
